@@ -1,5 +1,5 @@
 CC := cc
-CFLAGS := -Wall -Werror
+CFLAGS := -std=c89 -Wall -Werror
 NAME := otp
 INSTALL_PATH := /usr/local/bin/$(NAME)
 SOURCES := otp.c

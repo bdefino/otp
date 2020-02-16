@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
+#include <alloca.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -100,6 +101,7 @@ int main(int argc, char **argv) {
   koffset = 0;
   kpath = NULL;
   ofd = -1;
+  ooffset = 0;
   opath = NULL;
   perrors = NULL;
   retval = EXIT_SUCCESS;
@@ -178,7 +180,7 @@ int main(int argc, char **argv) {
     retval = -errno;
     goto bubble;
   }
-  ofd = open(opath, O_CREAT | O_RDONLY | O_WRONLY, S_IRWXU);
+  ofd = open(opath, O_CREAT | O_RDONLY | O_TRUNC | O_WRONLY, S_IRWXU);
 
   if (ofd < 0) {
     perrors = opath;
@@ -263,14 +265,14 @@ bubble:
 int otp(const int ofd, int ifd, const int kfd, const size_t buflen, off_t lim) {
   size_t cbuflen;
   size_t i;
-  char ibuf[buflen];
-  ssize_t icbuflen;
-  char obuf[buflen];
+  char *ibuf;
+  ssize_t iobuflen;
+  char *obuf;
   char *obufp;
-  ssize_t ocbuflen;
-  ssize_t otbuflen;
   int retval;
 
+  ibuf = NULL;
+  obuf = NULL;
   retval = 0;
 
   if (!buflen) {
@@ -293,41 +295,46 @@ int otp(const int ofd, int ifd, const int kfd, const size_t buflen, off_t lim) {
     goto bubble;
   }
 
+  /* allocate */
+
+  ibuf = (char *) alloca(buflen);
+
+  if (ibuf == NULL) {
+    retval = -errno;
+    goto bubble;
+  }
+  obuf = (char *) alloca(buflen);
+
+  if (obuf == NULL) {
+    retval = -errno;
+    goto bubble;
+  }
+
+  /* apply the one time pad */
+
   while (lim > 0) {
-    /* (partially) fill the buffer with the input */
+    /* read input */
 
-    cbuflen = icbuflen = read(ifd, ibuf, buflen < lim ? buflen : lim);
+    iobuflen = read(ifd, ibuf, buflen < lim ? buflen : lim);
 
-    if (icbuflen < 0) {
-      retval = -errno;
-      goto bubble;
-    } else if (!icbuflen) {
-      /* EOF */
-
-      retval = -EIO;
+    if (iobuflen <= 0) {
+      retval = !iobuflen ? -EIO : -errno;
       goto bubble;
     }
-    lim -= cbuflen;
-    printf("%lu\n", cbuflen);
+    cbuflen = iobuflen;
 
     /* read the corresponding key */
 
-    for (obufp = obuf, ocbuflen = 0; ocbuflen < cbuflen; ) {
-      otbuflen = read(kfd, obufp, cbuflen - ocbuflen);
+    for (i = 0, obufp = obuf; i < cbuflen; ) {
+      iobuflen = read(kfd, obufp, cbuflen - i);
 
-      if (otbuflen < 0) {
-        retval = -errno;
-        goto bubble;
-      } else if (!otbuflen) {
-        /* EOF */
-
-        retval = -EIO;
+      if (iobuflen <= 0) {
+        retval = !iobuflen ? -EIO : -errno;
         goto bubble;
       }
-      obufp += otbuflen;
-      ocbuflen += otbuflen;
+      i += iobuflen;
+      obufp += iobuflen;
     }
-    printf("%lu\n", ocbuflen);
 
     /* XOR */
 
@@ -335,26 +342,28 @@ int otp(const int ofd, int ifd, const int kfd, const size_t buflen, off_t lim) {
       obuf[i] ^= ibuf[i];
     }
 
-    /* shred input ASAP */
+    /* shred the input ASAP */
 
     memshred(ibuf, '\0', cbuflen);
 
     /* write the output */
 
-    for (obufp = obuf; ocbuflen > 0; ) {
-      otbuflen = write(ofd, obuf, ocbuflen);
+    for (i = 0, obufp = obuf; i < cbuflen; ) {
+      iobuflen = write(ofd, obufp, cbuflen - i);
 
-      if (otbuflen < 0) {
-        retval = -errno;
+      if (iobuflen <= 0) {
+        retval = !iobuflen ? -EIO : -errno;
         goto bubble;
       }
-      obufp += otbuflen;
-      ocbuflen -= otbuflen;
+      i += iobuflen;
+      obufp += iobuflen;
     }
 
-    /* shred output ASAP */
+    /* shred the output ASAP */
 
     memshred(obuf, '\0', cbuflen);
+    
+    lim -= cbuflen;
   }
 
 bubble:
@@ -365,8 +374,14 @@ bubble:
       retval = -errno;
     }
   }
-  memshred(ibuf, '\0', buflen);
-  memshred(obuf, '\0', buflen);
+  
+  if (obuf != NULL) {
+    memshred(obuf, '0', buflen);
+  }
+
+  if (ibuf != NULL) {
+    memshred(ibuf, '\0', buflen);
+  }
   return retval;
 }
 
