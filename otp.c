@@ -178,7 +178,7 @@ int main(int argc, char **argv) {
     retval = -errno;
     goto bubble;
   }
-  ofd = open(opath, O_CREAT | O_RDONLY | O_WRONLY);
+  ofd = open(opath, O_CREAT | O_RDONLY | O_WRONLY, S_IRWXU);
 
   if (ofd < 0) {
     perrors = opath;
@@ -226,21 +226,37 @@ bubble:
   _errno = errno;
 
   if (ofd >= 0) {
-    close(ofd);
+    if (close(ofd)
+        && !retval) {
+      _errno = errno;
+      perrors = opath;
+      retval = -errno;
+    }
   }
 
   if (tfd >= 0) {
-    close(tfd);
+    if (close(tfd)
+        && !retval) {
+      _errno = errno;
+      perrors = tpath;
+      retval = -errno;
+    }
   }
 
   if (kfd >= 0) {
-    close(kfd);
+    if (close(kfd)
+        && !retval) {
+      _errno = errno;
+      perrors = kpath;
+      retval = -errno;
+    }
   }
-  errno = _errno;
-  
-  if (retval) {
+
+  if (retval < 0) {
+    errno = _errno ? _errno : -retval;
     perror(perrors);
   }
+  errno = _errno;
   return retval;
 }
 
@@ -248,13 +264,11 @@ int otp(const int ofd, int ifd, const int kfd, const size_t buflen, off_t lim) {
   size_t cbuflen;
   size_t i;
   char ibuf[buflen];
-  char *ibufp;
   ssize_t icbuflen;
-  ssize_t irbuflen;
   char obuf[buflen];
   char *obufp;
   ssize_t ocbuflen;
-  ssize_t owbuflen;
+  ssize_t otbuflen;
   int retval;
 
   retval = 0;
@@ -280,38 +294,40 @@ int otp(const int ofd, int ifd, const int kfd, const size_t buflen, off_t lim) {
   }
 
   while (lim > 0) {
-    /* (partially) fill the buffer with the key */
+    /* (partially) fill the buffer with the input */
 
-    cbuflen = ocbuflen = read(kfd, obuf, buflen < lim ? buflen : lim);
+    cbuflen = icbuflen = read(ifd, ibuf, buflen < lim ? buflen : lim);
 
-    if (ocbuflen < 0) {
+    if (icbuflen < 0) {
       retval = -errno;
       goto bubble;
-    } else if (!ocbuflen) {
+    } else if (!icbuflen) {
       /* EOF */
 
       retval = -EIO;
       goto bubble;
     }
     lim -= cbuflen;
+    printf("%lu\n", cbuflen);
 
-    /* read the corresponding input */
+    /* read the corresponding key */
 
-    for (ibufp = ibuf, icbuflen = 0; icbuflen < ocbuflen; ) {
-      irbuflen = read(ifd, ibufp, ocbuflen - icbuflen);
+    for (obufp = obuf, ocbuflen = 0; ocbuflen < cbuflen; ) {
+      otbuflen = read(kfd, obufp, cbuflen - ocbuflen);
 
-      if (irbuflen < 0) {
+      if (otbuflen < 0) {
         retval = -errno;
         goto bubble;
-      } else if (!irbuflen) {
+      } else if (!otbuflen) {
         /* EOF */
 
         retval = -EIO;
         goto bubble;
       }
-      ibufp += irbuflen;
-      icbuflen += irbuflen;
+      obufp += otbuflen;
+      ocbuflen += otbuflen;
     }
+    printf("%lu\n", ocbuflen);
 
     /* XOR */
 
@@ -326,14 +342,14 @@ int otp(const int ofd, int ifd, const int kfd, const size_t buflen, off_t lim) {
     /* write the output */
 
     for (obufp = obuf; ocbuflen > 0; ) {
-      owbuflen = write(ofd, obuf, ocbuflen);
+      otbuflen = write(ofd, obuf, ocbuflen);
 
-      if (owbuflen < 0) {
+      if (otbuflen < 0) {
         retval = -errno;
         goto bubble;
       }
-      obufp += owbuflen;
-      ocbuflen -= icbuflen;
+      obufp += otbuflen;
+      ocbuflen -= otbuflen;
     }
 
     /* shred output ASAP */
