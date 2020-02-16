@@ -350,8 +350,8 @@ bubble:
       retval = -errno;
     }
   }
-  memshred(ibuf, '\0', cbuflen);
-  memshred(obuf, '\0', cbuflen);
+  memshred(ibuf, '\0', buflen);
+  memshred(obuf, '\0', buflen);
   return retval;
 }
 
