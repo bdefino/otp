@@ -47,9 +47,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
   "\t-k INT\n" \
   "\t\tseek to INT before reading the KEY\n" \
   "\t-o PATH\n" \
-  "\t\tchange the output PATH\n" \
-  "\t\t(setting this to an alternate path increases the number of copies\n" \
-  "\t\tof the output, so use it sparingly; defaults to TARGET)\n" \
+  "\t\tset an alternate output PATH\n" \
+  "\t\t(defaults to TARGET)\n" \
   "\t-t INT\n" \
   "\t\tseek to INT before reading the TARGET\n" \
   "TARGET\n" \
