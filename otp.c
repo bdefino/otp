@@ -188,6 +188,28 @@ int main(int argc, char **argv) {
     goto bubble;
   }
 
+  /* need the output count */
+
+  if (!has_ocount) {
+    if (stat(tpath, &ost)) {
+      perrors = tpath;
+      retval = -errno;
+      goto bubble;
+    }
+    ocount = ost.st_size;
+
+    if (S_ISBLK(ost.st_mode)
+        || S_ISCHR(ost.st_mode)) {
+      ocount = lseek(ofd, 0, SEEK_END);
+
+      if (ocount < 0) {
+        perrors = opath;
+        retval = -errno;
+        goto bubble;
+      }
+    }
+  }
+
   /* offset files */
   
   if (lseek(kfd, koffset, SEEK_SET) < 0) {
@@ -208,19 +230,10 @@ int main(int argc, char **argv) {
     goto bubble;
   }
 
-  if (!has_ocount) {
-    /* set the count to the target's size */
-
-    if (stat(tpath, &ost)) {
-      perrors = tpath;
-      retval = -errno;
-      goto bubble;
-    }
-    ocount = ost.st_size;
-  }
-
   /* apply the one time pad */
 
+  printf("\"%s\" ^ \"%s\" -> \"%s\" (%lu bytes)...\n", kpath, tpath, opath,
+    ocount);
   retval = otp(ofd, tfd, kfd, buflen, ocount);
 
 bubble:
@@ -362,7 +375,7 @@ int otp(const int ofd, int ifd, const int kfd, const size_t buflen, off_t lim) {
     /* shred the output ASAP */
 
     memshred(obuf, '\0', cbuflen);
-    
+
     lim -= cbuflen;
   }
 
