@@ -64,21 +64,26 @@ static void *(* volatile memshred)(void *, int, size_t) = \
 	(void *(* volatile)(void *, int, size_t)) &memset;
 
 /* print the usage */
-static void usage(const char *executable);
+static void
+usage(const char *executable);
 
 /* print the usage and option information */
-static void help(const char *executable) {
+static void
+help(const char *executable)
+{
 	usage(executable != NULL ? executable : "?");
 	fprintf(stderr, OPTIONS);
 }
 
 /* XOR a key file with an input file to an output file */
-int otp(const int ofd, const int ifd, const int kfd, const size_t buflen,
+int
+otp(const int ofd, const int ifd, const int kfd, const size_t buflen,
 	off_t lim);
 
-int main(int argc, char **argv) {
+int
+main(int argc, char **argv)
+{
 	size_t buflen;
-	int _errno;
 	int has_ocount;
 	int kfd;
 	off_t koffset;
@@ -180,14 +185,14 @@ int main(int argc, char **argv) {
 	if (tfd < 0) {
 		perrors = tpath;
 		retval = -errno;
-		goto bubble;
+		goto bubble_kfd_ok;
 	}
 	ofd = open(opath, O_CREAT | O_RDONLY | O_TRUNC | O_WRONLY, S_IRWXU);
 
 	if (ofd < 0) {
 		perrors = opath;
 		retval = -errno;
-		goto bubble;
+		goto bubble_tfd_ok;
 	}
 
 	/* need the output count */
@@ -196,7 +201,7 @@ int main(int argc, char **argv) {
 		if (stat(tpath, &ost)) {
 			perrors = tpath;
 			retval = -errno;
-			goto bubble;
+			goto bubble_ofd_ok;
 		}
 		ocount = ost.st_size;
 
@@ -207,7 +212,7 @@ int main(int argc, char **argv) {
 			if (ocount < 0) {
 				perrors = opath;
 				retval = -errno;
-				goto bubble;
+				goto bubble_ofd_ok;
 			}
 		}
 	}
@@ -217,19 +222,19 @@ int main(int argc, char **argv) {
 	if (lseek(kfd, koffset, SEEK_SET) < 0) {
 		perrors = kpath;
 		retval = -errno;
-		goto bubble;
+		goto bubble_ofd_ok;
 	}
 
 	if (lseek(tfd, toffset, SEEK_SET) < 0) {
 		perrors = tpath;
 		retval = -errno;
-		goto bubble;
+		goto bubble_ofd_ok;
 	}
 
 	if (lseek(ofd, ooffset, SEEK_SET) < 0) {
 		perrors = opath;
 		retval = -errno;
-		goto bubble;
+		goto bubble_ofd_ok;
 	}
 
 	/* apply the one time pad */
@@ -237,47 +242,35 @@ int main(int argc, char **argv) {
 	printf("\"%s\" ^ \"%s\" -> \"%s\" (%lu bytes)...\n", kpath, tpath,
 		opath, ocount);
 	retval = otp(ofd, tfd, kfd, buflen, ocount);
-
+bubble_ofd_ok:
+	if (close(ofd)
+			&& !retval) {
+		perrors = opath;
+		retval = -errno;
+	}
+bubble_tfd_ok:
+	if (close(tfd)
+			&& !retval) {
+		perrors = tpath;
+		retval = -errno;
+	}
+bubble_kfd_ok:
+	if (close(kfd)
+			&& !retval) {
+		perrors = kpath;
+		retval = -errno;
+	}
 bubble:
-
-	_errno = errno;
-
-	if (ofd >= 0) {
-		if (close(ofd)
-				&& !retval) {
-			_errno = errno;
-			perrors = opath;
-			retval = -errno;
-		}
-	}
-
-	if (tfd >= 0) {
-		if (close(tfd)
-				&& !retval) {
-			_errno = errno;
-			perrors = tpath;
-			retval = -errno;
-		}
-	}
-
-	if (kfd >= 0) {
-		if (close(kfd)
-				&& !retval) {
-			_errno = errno;
-			perrors = kpath;
-			retval = -errno;
-		}
-	}
-
 	if (retval < 0) {
-		errno = _errno ? _errno : -retval;
+		errno = -retval;
 		perror(perrors);
 	}
-	errno = _errno;
 	return retval;
 }
 
-int otp(const int ofd, int ifd, const int kfd, const size_t buflen, off_t lim) {
+int
+otp(const int ofd, int ifd, const int kfd, const size_t buflen, off_t lim)
+{
 	size_t cbuflen;
 	size_t i;
 	char *ibuf;
@@ -322,7 +315,7 @@ int otp(const int ofd, int ifd, const int kfd, const size_t buflen, off_t lim) {
 
 	if (obuf == NULL) {
 		retval = -errno;
-		goto bubble;
+		goto bubble_ibuf_ok;
 	}
 
 	/* apply the one time pad */
@@ -334,7 +327,7 @@ int otp(const int ofd, int ifd, const int kfd, const size_t buflen, off_t lim) {
 
 		if (iobuflen <= 0) {
 			retval = !iobuflen ? -EIO : -errno;
-			goto bubble;
+			goto bubble_ofd_ok;
 		}
 		cbuflen = iobuflen;
 
@@ -344,8 +337,8 @@ int otp(const int ofd, int ifd, const int kfd, const size_t buflen, off_t lim) {
 			iobuflen = read(kfd, obufp, cbuflen - i);
 
 			if (iobuflen <= 0) {
-				retval = !iobuflen ? -EIO : -errno;
-				goto bubble;
+				retval = iobuflen ? -errno : -EIO;
+				goto bubble_ofd_ok;
 			}
 			i += iobuflen;
 			obufp += iobuflen;
@@ -367,8 +360,8 @@ int otp(const int ofd, int ifd, const int kfd, const size_t buflen, off_t lim) {
 			iobuflen = write(ofd, obufp, cbuflen - i);
 
 			if (iobuflen <= 0) {
-				retval = !iobuflen ? -EIO : -errno;
-				goto bubble;
+				retval = iobuflen ? -errno : -EIO;
+				goto bubble_ofd_ok;
 			}
 			i += iobuflen;
 			obufp += iobuflen;
@@ -380,27 +373,21 @@ int otp(const int ofd, int ifd, const int kfd, const size_t buflen, off_t lim) {
 
 		lim -= cbuflen;
 	}
-
+bubble_ofd_ok:
+	if (fdatasync(ofd)
+			&& !retval) {
+		retval = -errno;
+	}
+	memshred(obuf, '\0', buflen);
+bubble_ibuf_ok:
+	memshred(ibuf, '\0', buflen);
 bubble:
-
-	if (ofd >= 0) {
-		if (fdatasync(ofd)
-				&& !retval) {
-			retval = -errno;
-		}
-	}
-	
-	if (obuf != NULL) {
-		memshred(obuf, '0', buflen);
-	}
-
-	if (ibuf != NULL) {
-		memshred(ibuf, '\0', buflen);
-	}
 	return retval;
 }
 
-static void usage(const char *executable) {
+static void
+usage(const char *executable)
+{
 	fprintf(stderr, USAGE, executable);
 }
 
